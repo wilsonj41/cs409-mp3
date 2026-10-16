@@ -12,8 +12,8 @@
     "node": ">=24"
   },
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js",
+    "start": "npx tsc && node out/server.js",
+    "dev": "tsc-watch --onSuccess \"nodemon out/server.js\"",
     "submit": "node submit.js"
   },
   "repository": {
@@ -26,6 +26,10 @@
     "mongoose": "^9.0.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.10"
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.5",
+    "nodemon": "^3.1.10",
+    "tsc-watch": "^7.2.1",
+    "typescript": "^7.0.2"
   }
 }
