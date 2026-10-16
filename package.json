@@ -12,7 +12,8 @@
     "node": ">=24"
   },
   "scripts": {
-    "start": "npx tsc && node out/server.js",
+    "build": "npx tsc",
+    "start": "node out/server.js",
     "dev": "tsc-watch --onSuccess \"nodemon out/server.js\"",
     "submit": "node submit.js"
   },
