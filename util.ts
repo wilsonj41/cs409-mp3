@@ -1,23 +1,12 @@
-import { Model } from "mongoose"
+import mongoose, { Model } from "mongoose"
 import { ParsedQs } from "qs"
 
-type JSONValue =
-    | string
-    | number
-    | boolean
-    | null
-    | JSONValue[]
-    | JSONObject;
-
-export interface JSONObject {
-    [key: string]: JSONValue;
-}
-
-export class RequestResponseError {
+export class RequestResponseError extends Error {
     status: number;
     message: string;
 
     constructor(message: string, status = 400) {
+        super(message)
         this.status = status
         this.message = message
     }
@@ -42,6 +31,22 @@ function isObjectJSON(str: any) {
     }
 }
 
+function parseNonNegativeInteger(value: unknown, field: string): number {
+    if (typeof value !== 'string') {
+        throw new RequestResponseError(`${field} must be a non-negative integer`);
+    }
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(value);
+    } catch {
+        throw new RequestResponseError(`${field} must be a non-negative integer`);
+    }
+    if (typeof parsed !== 'number' || !Number.isSafeInteger(parsed) || parsed < 0) {
+        throw new RequestResponseError(`${field} must be a non-negative integer`);
+    }
+    return parsed;
+}
+
 /**
  * Generates the object used as the HTTP response
  * @param message The human-readable message
@@ -58,7 +63,7 @@ export function getResponseObject(message: string, data: any = {}) {
 /**
  * Convert URL query string into query documents
  * @param urlQuery URL query from which query documents should be generated
- * @param model the model whose schema is used to filter unnecessary properties
+ * @param model the model used to choose the default collection limit
  * @param selectOnly whether we only care about select
  * @returns Query document object
  */
@@ -68,15 +73,14 @@ export function parseURLQuery(model: Model<any>, urlQuery: ParsedQs, selectOnly 
         sort: sortJSONStr = '{}',
         where: whereJSONStr = '{}',
         skip: skipNumberStr = '0',
-        limit: limitNumberStr = '0',
+        limit: limitNumberStr = model.modelName === 'Task' ? '100' : '0',
         count: countBooleanStr = 'false',
     } = urlQuery;
 
 
     // Make sure that select, if any, should be a JSON string:
     // 1. that depicts an object
-    // 2. with all property names existing in the schema
-    // 3. with 0 or 1 as values (either as string or number)
+    // 2. with 0 or 1 as values (either as string or number)
     //    and should be consistent across all properties except for
     //    _id, if there is one
     if (
@@ -87,7 +91,7 @@ export function parseURLQuery(model: Model<any>, urlQuery: ParsedQs, selectOnly 
         ) ||
         !Object.entries(JSON.parse(selectJSONStr)).filter(([key]) => key !== '_id').every((val, idx, arr) => idx === 0 || Number(val[1]) === Number(arr[idx - 1][1]))
     ) {
-        throw new RequestResponseError('select (if any) should be a JSON document with values being execlusively 0 or 1, no mixes (except for \'_id\')')
+        throw new RequestResponseError('select must be a JSON object containing only 0 or only 1, except for _id')
     }
 
     let selectDocument: Record<string, 0 | 1> = Object.fromEntries(
@@ -129,31 +133,8 @@ export function parseURLQuery(model: Model<any>, urlQuery: ParsedQs, selectOnly 
 
     let whereDocument = JSON.parse(whereJSONStr)
 
-    // Check skip
-    if (
-        typeof skipNumberStr !== 'string' ||
-        skipNumberStr.trim().length === 0 ||
-        !Array.from(skipNumberStr).every((char) => char >= '0' && char <= '9') ||
-        !Number.isSafeInteger(Number(skipNumberStr)) ||
-        Number(skipNumberStr) < 0
-    ) {
-        throw new RequestResponseError('skip (if any) should be a non-nagative integer')
-    }
-
-    let skipNumber = Number(skipNumberStr)
-
-    // Check limit
-    if (
-        typeof limitNumberStr !== 'string' ||
-        limitNumberStr.trim().length === 0 ||
-        !Array.from(limitNumberStr).every((char) => char >= '0' && char <= '9') ||
-        !Number.isSafeInteger(Number(limitNumberStr)) ||
-        Number(limitNumberStr) < 0
-    ) {
-        throw new RequestResponseError('limit (if any) should be a non-nagative integer')
-    }
-
-    let limitNumber = Number(limitNumberStr)
+    const skipNumber = parseNonNegativeInteger(skipNumberStr, 'skip')
+    const limitNumber = parseNonNegativeInteger(limitNumberStr, 'limit')
 
     if (
         typeof countBooleanStr !== 'string' ||
@@ -191,42 +172,48 @@ export async function getQueryResultForGeneralQuery(model: Model<any>, urlQuery:
             count
         } = parseURLQuery(model, urlQuery)
 
-        let queryResult: number | Object[];
+        const conditions = model.find(where);
+        // Validate filter values and operators before executing any database call.
+        try {
+            conditions.cast(model);
+        } catch {
+            throw new RequestResponseError('Invalid query field or value', 400);
+        }
+        if (count) {
+            return await model.countDocuments(conditions.getFilter());
+        }
 
-        let query = model
-        .find()
+        let query = conditions
         .select(select)
-        .where(where)
         .skip(skip ?? 0)
         .limit(limit ?? 0)
         .sort(sort)
         
-        if (count) {
-            queryResult = await query.countDocuments();
-        } else {
-            queryResult = await query.lean();
-        }
-
-        return queryResult
+        return await query.lean()
 
     } catch (err) {
-        if (err instanceof RequestResponseError || err instanceof Error) {
-            throw new RequestResponseError(err.message, 400)
+        if (err instanceof RequestResponseError) {
+            throw err
+        }
+        if (err instanceof mongoose.Error.CastError ||
+            (err instanceof mongoose.mongo.MongoServerError && typeof err.code === 'number' &&
+                [2, 9, 14, 72, 168, 31253, 31254].includes(err.code))) {
+            throw new RequestResponseError('Invalid query field or value', 400)
         }
 
-        throw new RequestResponseError('Unknown error occured', 500)
+        throw new RequestResponseError('An unexpected server error occurred', 500)
     }
 }
 
 export async function findDocumentById(model: Model<any>, id: string, select: Record<string, 0 | 1> = {}) {
     try {
-        return await model
-        .where({ '_id': id })
-        .select(select)
-        .findOne()
-        .lean()
+        return await model.findById(id, select).lean()
     } catch (err) {
-        throw new RequestResponseError('Unknown error occured', 500)
+        if (err instanceof mongoose.Error.CastError && err.path === '_id') {
+            throw new RequestResponseError(`Invalid id: ${id}`, 404)
+        }
+
+        throw new RequestResponseError('An unexpected server error occurred', 500)
     }
 
 }

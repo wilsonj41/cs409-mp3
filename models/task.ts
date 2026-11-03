@@ -1,4 +1,4 @@
-import mongoose, { mongo } from "mongoose";
+import mongoose from "mongoose";
 
 var TaskSchema = new mongoose.Schema({
     name: {
@@ -16,6 +16,19 @@ var TaskSchema = new mongoose.Schema({
     completed: {
         type: Boolean,
         default: false
+    },
+    assignedUser: {
+        type: String,
+        default: ''
+    },
+    assignedUserName: {
+        type: String,
+        default: 'unassigned'
+    },
+    dateCreated: {
+        type: Date,
+        default: Date.now,
+        immutable: true
     }
 
 });

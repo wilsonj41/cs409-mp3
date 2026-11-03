@@ -9,12 +9,14 @@ var UserSchema = new mongoose.Schema({
     },
     email: {
         type: String,
-        required: true
+        required: true,
+        unique: true
     },
     pendingTasks: [String],
     dateCreated: {
         type: Date,
-        default: Date.now
+        default: Date.now,
+        immutable: true
     }
 });
 
