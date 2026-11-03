@@ -1,8 +1,9 @@
 import { Express, Router } from "express";
-import home = require('./home')
+import api from './api';
+
 /*
  * Connect all of your endpoints together here.
  */
-export = function (app: Express, router: Router) {
-    app.use('/api', home(router));
+export default function (app: Express, router: Router) {
+    app.use('/api', api(router));
 };
