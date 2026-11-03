@@ -21,7 +21,8 @@ export default function resourceRoutes(router: Router, model: Model<any>,
         res.status(200).json(getResponseObject('OK', await save(req.body, req.params.id)));
     });
     router.delete('/:id', async (req, res) => {
-        res.status(204).end()
+        await remove(req.params.id);
+        res.status(204).end();
     });
     return router;
 }
